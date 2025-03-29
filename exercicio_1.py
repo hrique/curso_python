@@ -11,4 +11,3 @@ print('Ano de Nascimento:', ano_nascimento)
 print('É maior de idade?', maior_de_idade)
 print('Altura em metros:', altura_metros)
 
-#asdkjaosidji

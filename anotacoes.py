@@ -68,4 +68,41 @@ print(bool(''), (str('ou')), bool(' '))
 print('\n')
 #
 
-#asdkjaosidji
+#operadores aritméticos
+adicao = 10 + 10
+
+subtracao = 10 - 5
+
+multiplicacao = 10 * 10
+
+#divisao com numeros quebrados ou inteiros, sempre retorna em float
+divisao = 10 / 2.2
+
+#divisao inteira (sempre trunca/arredonda o resultado)
+divisao_inteira = 10 // 2.2
+
+#potenciacao
+exponenciacao = 2 ** 10
+
+#retorna o resto da divisao
+modulo = 55 % 2 
+
+#concatenacao, juntar 2 strings
+concatenacao = "A" + "B"
+
+#repeticao de strings
+a_dez_vezes = 'A' * 10
+tres_vezes_henrique = 3 * 'Henrique'
+
+#separador
+print('\n')
+#
+
+#ordem de execução aritmética
+#1. (n + n) os parenteses sempre são executados de dentro para fora ex: (4(3(2(1))))
+#2. **
+#3. * / // % em operações de mesmo "nivel" é executado da esquerda para a direita
+#4. + -
+conta_1 = 1 + 1 ** 5 + 5 = 7
+conta_1_ordenada = (1 + 1) ** (5 + 5) = 1024
+
