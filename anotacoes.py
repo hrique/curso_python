@@ -106,3 +106,11 @@ print('\n')
 conta_1 = 1 + 1 ** 5 + 5 = 7
 conta_1_ordenada = (1 + 1) ** (5 + 5) = 1024
 
+#solicitar dados do usuario, o programa para na linha até o usuario interagir, 
+# saida sempre é no tipo string
+# input('Qual o seu nome? ')
+# numero_1 = input ('Digite um numero: ')
+# int_numero_1 = int(numero_1)
+# int_numero_2 = int(numero_2)
+# print(f'A soma dos números é: {numero_1 + numero_2})'
+
