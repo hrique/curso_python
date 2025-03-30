@@ -151,3 +151,31 @@ conta_1_ordenada = (1 + 1) ** (5 + 5) = 1024
 # São considerados falsy:
 # 0 0.0 '' False
 # Também existe o tipo None que é usado para representar um não valor.
+
+# or - Qualquer condição verdadeira avalia toda a expressão como verdadeira.
+# Ex: if (entrada == 'E' or entrada == 'e') and senha_digitada == senha_permitida:
+#       print('Entrar')
+#     else:
+#       print('Sair')
+
+# not - Utilizado para inverter expressões
+# not True = False
+# not False = True
+
+#Operadores in e not in
+#Strings são iteraveis, pode utilizar o in para verificar se um ou mais valores estão
+#  dentro de uma variavel, not in faz o contrario do in
+# Ex: nome = 'Henrique'
+#     print ('H' in nome)  >>>> retorna True, pois o H esta dentro do nome Henrique
+
+# Interpolação basica de strings
+# s - string
+# d e i - int
+# f - float
+# x e X - Hexadecimal (ABCDEF0123456789)
+# 
+# 
+
+
+# 
+#  
