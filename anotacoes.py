@@ -114,3 +114,40 @@ conta_1_ordenada = (1 + 1) ** (5 + 5) = 1024
 # int_numero_2 = int(numero_2)
 # print(f'A soma dos números é: {numero_1 + numero_2})'
 
+#blocos de código condicionais
+#if  / elif      / else
+#se  /se não se  / se não
+#Ex:
+
+#entrada = input('Você quer "entrar" ou "sair" do sistema? ')
+
+#if entrada == 'entrar':    (se atender a esta condição executa o codigo abaixo)
+#   print('Você entrou no sistema')
+#   print('xdxdxdxdxdxdxd')
+#elif entrada == 'sair':     (se nao atender a primeira condição e atender a 
+# segunda executa o codigo abaixo, podemos ter varios elif no mesmo bloco)
+#   print('Você saiu do sistema')
+#else:          (se nao atender nenhuma das condições executa o codigo abaixo)
+#   print('Você não digitou nem entrar e nem sair.')
+
+# extras: podemos ter varios elif para ter mais condições dentro do mesmo if
+# podemos digitar pass para o código seguir e ignorar aquela condição
+# a primeira condição que atender executa o codigo relacionado e pula todas as
+# outras condições do mesmo if
+ 
+#Operadores de comparação (relacionais)
+#OP         Significado         Exemplo (True)
+#>          maior               2 > 1
+#>=         maior ou igual      2 >= 2
+#<          menor               1 < 2
+#<=         menor ou igual      2 <= 2
+#==         igual               'a' == 'a'
+#!=         diferente           'a' != 'b'
+
+#Operadores lógicos
+# and (e) or (ou) not (não)
+# and - Todas as condições precisam ser verdadeiras, se qualquer valor for
+# considerado falso, a expressão inteira será avaliada naquele valor.
+# São considerados falsy:
+# 0 0.0 '' False
+# Também existe o tipo None que é usado para representar um não valor.
