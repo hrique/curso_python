@@ -174,8 +174,30 @@ conta_1_ordenada = (1 + 1) ** (5 + 5) = 1024
 # f - float
 # x e X - Hexadecimal (ABCDEF0123456789)
 # 
-# 
 
+# Formatação básica de strings 
+# s - string
+# d - int
+# f - float
+# .<numero de digitos>f
+# x ou X - Hexadecimal
+# (Caractere)(><^)(quantidade)
+# > - Esquerda
+# < - Direita
+# ^ - Centro
+# Sinal - + ou -
+# Ex.: 0>-100,.1f
+# Conversion flags !r !s !a
 
+# variavel = 'ABC'
+# print(f'{variavel}')
+
+# print(f'{variavel:$>10}')  - joga o valor da variavel para a direita e 
+# adiciona o simbolo $ a esquerda até chegar no numero indicado 
+
+# print(f'{variavel:&<10}')  - joga o valor da variavel para a esquerda e 
+# adiciona o simbolo & a direita até chegar no numero indicado 
+
+# print(f'{variavel:#^10}')  - joga o valor da variavel para o centro e 
+# adiciona o simbolo # a direita e esquerda até chegar no numero indicado 
 # 
-#  
