@@ -1,0 +1,36 @@
+convidados = ['einstein', 'tesla', 'fabio akita']
+lista_convidados = f'A lista de convidados tem as seguintes pessoas: {convidados}'
+print(lista_convidados)
+
+msg_conv_1 = f'\nOlá {convidados[1].title()} vamos sair para jantar?'
+print(msg_conv_1)
+
+msg_conv_2 = f'\nOlá {convidados[2].title()} vamos sair para jantar?'
+print(msg_conv_2)
+
+msg_conv_3 = f'\nOlá {convidados[0].title()} vamos sair para jantar?'
+print(msg_conv_3)
+
+print(f'\nInfelizmente o {convidados[1].title()}, não poderá comparecer ao Jantar.')
+
+convidados[1] = 'faker'
+
+msg_conv_4 = f'\nOlá {convidados[1].title()} gostaria de sair para jantar?'
+print(msg_conv_4)
+
+print(f'\nOlá pessoal, consegui uma mesa maior e posso chamar mais 3 pessoas!')
+
+convidados.insert(1,'fabio brazza')
+convidados.insert(1,'tom morello')
+convidados.append('hideo kojima')
+
+print(convidados)
+
+msg_conv_5 = f'\nOlá {convidados[1].title()} gostaria de sair para jantar?'
+msg_conv_6 = f'\nOlá {convidados[2].title()} gostaria de sair para jantar?'
+msg_conv_7 = f'\nOlá {convidados[-1].title()} gostaria de sair para jantar?'
+
+print(msg_conv_5)
+print(msg_conv_6)
+print(msg_conv_7)
+
