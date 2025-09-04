@@ -13,9 +13,9 @@ amigo_pizzas.append('pizza vegana')
 
 
 print('\nMinhas pizzas favoritas são: ')
-for pizzas in lista_pizzas:
-    print(pizzas)
+for pizza in lista_pizzas:
+    print(pizza)
 
 print('\nAs pizzas favoritas do meu amigo são: ')
-for pizzass in amigo_pizzas:
-    print(pizzass)
+for pizza in amigo_pizzas:
+    print(pizza)
