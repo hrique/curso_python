@@ -98,3 +98,12 @@ ALTER TABLE composto_por ADD CONSTRAINT FK_composto_vinho
     FOREIGN KEY (fk_vinho_id_vinho)
     REFERENCES vinho (id_vinho)
     ON DELETE CASCADE;
+
+ALTER TABLE vinho
+    ADD COLUMN ativo TINYINT(1) NOT NULL DEFAULT 1;
+    
+ALTER TABLE tipo
+ADD COLUMN ativo TINYINT(1) NOT NULL DEFAULT 1;
+
+ALTER TABLE paisorigem
+ADD COLUMN ativo TINYINT(1) NOT NULL DEFAULT 1;

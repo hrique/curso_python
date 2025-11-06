@@ -17,7 +17,7 @@ typedef struct {
 void criarVinho();
 void listarVinhos();
 void atualizarVinho();
-void deletarVinho();
+void desativarVinho();
 
 //nome do arquivo onde os dados serao armazenados
 const char* FILENAME = "vinhos.dat";
@@ -49,7 +49,7 @@ int main() {
                 atualizarVinho();
                 break;
             case 4:
-                deletarVinho();
+                desativarVinho();
                 break;
             case 0:
                 printf("Saindo do Programa...\n");
@@ -210,7 +210,7 @@ void atualizarVinho() {
 }
 
 //DELETE
-void deletarVinho() {
+void desativarVinho() {
     int id_busca;
     int encontrado = 0;
     Vinho v;
