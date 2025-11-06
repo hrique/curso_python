@@ -1139,7 +1139,6 @@ void desativarPais() {
 
     // Erro no EXECUTE
     if (mysql_stmt_execute(stmt)) {
-        // Erro de FK (1451) não é mais relevante aqui
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
     } else {
         // Se a execução foi SUCESSO, verifica as linhas
