@@ -121,3 +121,11 @@ INSERT INTO nivel (nome_nivel, descricao)
     
 INSERT INTO usuario (nome_usuario, email, senha, fk_nivel_id_nivel, ativo) 
 	VALUES ('Admin', 'admin@vintagem.com.br', '9287cc6c53b94a0527d41c16678a93d2e95361287bef29e66ee7970698d34edf', 1, 1);
+    
+CREATE TABLE log (
+    id_log INT PRIMARY KEY AUTO_INCREMENT,
+    data_hora TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    acao VARCHAR(500) NOT NULL,
+    fk_usuario_id_usuario INT,
+    FOREIGN KEY (fk_usuario_id_usuario) REFERENCES usuario(id_usuario)
+);

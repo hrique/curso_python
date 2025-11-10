@@ -11,6 +11,9 @@ const char *user = "root";
 const char *password = "@vintagem123";
 const char *database = "vintagem";
 
+int g_id_usuario_logado = 0;
+char g_nome_nivel_logado[51] = "";
+
 //Definindo a estrutura para um Vinho
 typedef struct {
     int id_vinho; //usado apenas para armazenar dados lidos
@@ -70,6 +73,15 @@ void limparTela();
 void pausarTela();
 //Prototipo login
 int realizarLogin();
+//Prototipo das movimentacoes
+void menuMovimentacoes();
+//Prototipo Venda
+void registrarSaida();
+//Prototipos de LOGs
+void menuLogs();
+void listarLogs();
+void listarTodosLogs();
+void registrarLog(const char *acao);
 
 // Funcao auxiliar para tratar erros do MySQL
 void finish_with_error(MYSQL *con) {
@@ -81,19 +93,25 @@ void finish_with_error(MYSQL *con) {
 int main() {
     int opcao;
     int tentativas;
-    int login_sucesso = 0;
+    int id_logado = 0; // Flag para o ID do usuário
 
     mysql_library_init(0, NULL, NULL);
 
+    // --- Bloco de Login com 3 Tentativas (Preenchido) ---
     for (tentativas = 1; tentativas <= 3; tentativas++) {
-        if (realizarLogin() == 1) {
-            // Login bem-sucedido
-            login_sucesso = 1; // Marca a flag de sucesso
+        id_logado = realizarLogin(); // Recebe 0 (falha) ou o ID (sucesso)
+        
+        if (id_logado > 0) { // Checa se o login foi bem-sucedido
+            g_id_usuario_logado = id_logado; // Salva o ID globalmente
             printf("\nLogin realizado com sucesso!\n");
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "LOGIN SUCESSO: Usuario %s (ID: %d) logou.", g_nome_nivel_logado, g_id_usuario_logado);
+            registrarLog(log_msg);
             pausarTela();
             break; // Sai do loop 'for'
         } else {
-            // Login falhou
+            // Lógica de Falha
             limparTela();
             fprintf(stderr, "\n>>> LOGIN FALHOU (Tentativa %d de 3) <<<\n", tentativas);
             fprintf(stderr, "Email ou senha incorretos, ou usuario inativo.\n");
@@ -103,16 +121,17 @@ int main() {
     }
 
     // --- Verificação Pós-Loop ---
-    if (login_sucesso == 0) {
-        // Se o loop terminou (3 tentativas) e a flag ainda é 0
+    if (g_id_usuario_logado == 0) { // Se a flag global ainda é 0
+        // Lógica de 3 Falhas
         limparTela();
         fprintf(stderr, "\n>>> ACESSO NEGADO <<<\n");
         fprintf(stderr, "Voce falhou 3 tentativas de login. O programa sera encerrado.\n");
         pausarTela();
-        mysql_library_end();
-        return 1; // Encerra o programa
+        mysql_library_end(); // Limpa a biblioteca antes de sair
+        return 1; // Encerra o programa com erro
     }
-
+    
+    // Se o login foi bem-sucedido, o loop principal começa
     do {
         limparTela();
         printf("\n--- ADEGA VINTAGEM ---\n");
@@ -126,6 +145,13 @@ int main() {
         printf("6. Gerenciar Paises\n");
         printf("7. Gerenciar Uvas\n");
         printf("8. Lista de Inativos (Reativar)\n");
+        printf("9. Movimentar Estoque\n");
+
+        // --- Menu Condicional de Admin ---
+        if (strcmp(g_nome_nivel_logado, "Admin") == 0) {
+            printf("10. Gerenciar Logs\n");
+        }
+        
         printf("\n0. Sair\n");
         printf("Escolha uma das opcoes acima: ");
         
@@ -133,6 +159,7 @@ int main() {
         while(getchar() != '\n');
 
         switch (opcao) {
+            // --- Casos 1-9 (Preenchidos) ---
             case 1:
                 criarVinho();
                 pausarTela();
@@ -161,6 +188,21 @@ int main() {
             case 8:
                 menuListaInativos();
                 break;
+            case 9:
+                menuMovimentacoes();
+                // A pausa já está dentro do menuMovimentacoes
+                break;
+            
+            // --- Case Condicional de Admin ---
+            case 10:
+                if (strcmp(g_nome_nivel_logado, "Admin") == 0) {
+                    menuLogs();
+                } else {
+                    printf("Opcao invalida! Tente Novamente.\n");
+                    pausarTela();
+                }
+                break;
+
             case 0:
                 printf("Saindo do Programa...\n");
                 break;
@@ -171,8 +213,8 @@ int main() {
         }
     } while (opcao != 0);
 
-    mysql_library_end();
-    return 0;
+    mysql_library_end(); // Limpa a biblioteca ao sair normalmente
+    return 0; // Termina o programa com sucesso
 }
 
 // Conecta ao banco de dados
@@ -202,8 +244,9 @@ MYSQL* conectar_db() {
 
 
 /*
- * Pede email e senha, envia para o DB, e deixa o DB comparar os hashes.
- * Retorna 1 (true) se o login for bem-sucedido.
+ * Pede email e senha, verifica no banco.
+ * Salva o ID e o NOME_NIVEL do usuário nas variáveis globais.
+ * Retorna o ID do usuário (ex: 1, 2, 3...) se o login for bem-sucedido.
  * Retorna 0 (false) se o login falhar.
  */
 int realizarLogin() {
@@ -211,26 +254,29 @@ int realizarLogin() {
     char senha_digitada[256];
     char ch;
     int i = 0;
-    int login_sucesso = 0;
-
+    
+    // O valor de sucesso agora é o ID do usuário
+    int id_usuario_out = 0;
+    char nome_nivel_out[51] = "";
+    
     // Variáveis para o Banco
     MYSQL *con = conectar_db();
     MYSQL_STMT *stmt;
-    MYSQL_BIND bind_in[2];
-
-    // query faz o HASH dentro do SQL com SHA2()
-    char query[] = "SELECT id_usuario FROM usuario WHERE email = ? AND senha = SHA2(?, 256) AND ativo = 1";
+    MYSQL_BIND bind_in[2]; 
+    MYSQL_BIND bind_out[2];
+    
+    // A query agora usa JOIN para buscar o nome do nível
+    char query[] = "SELECT u.id_usuario, n.nome_nivel "
+                   "FROM usuario AS u "
+                   "JOIN nivel AS n ON u.fk_nivel_id_nivel = n.id_nivel "
+                   "WHERE u.email = ? AND u.senha = SHA2(?, 256) AND u.ativo = 1";
 
     limparTela();
-    printf("\n--- AREA RESTRITA! ---\n");
-    printf("--- LOGIN VINTAGEM ---\n");
-    printf("Email: ");
+    printf("\n--- LOGIN VINTAGEM ---\n");
+    printf("Digite seu Email: ");
     scanf("%100[^\n]", email);
     while(getchar() != '\n');
-
-    printf("Senha: ");
-    
-    // 1. Captura a senha (igual a antes)
+    printf("Digite sua Senha: ");
     i = 0;
     while (1) {
         ch = _getch();
@@ -242,6 +288,7 @@ int realizarLogin() {
 
     // --- 3. Verificar no Banco ---
     stmt = mysql_stmt_init(con);
+    // CORREÇÃO: Erro no init
     if (!stmt) { 
         fprintf(stderr, " mysql_stmt_init() falhou\n");
         mysql_close(con); 
@@ -255,18 +302,17 @@ int realizarLogin() {
         return 0;
     }
 
-    // MUDANÇA: Bind dos 2 parâmetros (email E senha digitada)
+    // Bind dos 2 parâmetros (email e senha)
     memset(bind_in, 0, sizeof(bind_in));
-    // Param 0: email
     bind_in[0].buffer_type = MYSQL_TYPE_STRING;
     bind_in[0].buffer = (char *)email;
     bind_in[0].buffer_length = strlen(email);
-    // Param 1: senha_digitada
+    
     bind_in[1].buffer_type = MYSQL_TYPE_STRING;
     bind_in[1].buffer = (char *)senha_digitada;
     bind_in[1].buffer_length = strlen(senha_digitada);
 
-
+    // CORREÇÃO: Erro no bind
     if (mysql_stmt_bind_param(stmt, bind_in)) { 
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -274,31 +320,49 @@ int realizarLogin() {
         return 0;
     }
     
+    // CORREÇÃO: Erro no execute
     if (mysql_stmt_execute(stmt)) { 
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
         mysql_close(con);
         return 0;
     }
-
-    // Armazena o resultado
-    if (mysql_stmt_store_result(stmt)) {
+    
+    // CORREÇÃO: Erro no store_result
+    if (mysql_stmt_store_result(stmt)) { 
         fprintf(stderr, " mysql_stmt_store_result() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
         mysql_close(con);
         return 0;
     }
 
-    // checamos se a query (com a comparação de hash) encontrou uma linha.
+    // Agora verificamos se a query retornou 1 linha
     if (mysql_stmt_num_rows(stmt) == 1) {
-        login_sucesso = 1; // Sucesso! O DB encontrou uma correspondência.
+        // Se encontrou, buscamos o ID e o Nível
+        memset(bind_out, 0, sizeof(bind_out));
+        
+        bind_out[0].buffer_type = MYSQL_TYPE_LONG;
+        bind_out[0].buffer = (char *)&id_usuario_out;
+        
+        bind_out[1].buffer_type = MYSQL_TYPE_STRING;
+        bind_out[1].buffer = nome_nivel_out;
+        bind_out[1].buffer_length = 51;
+        
+        if (mysql_stmt_bind_result(stmt, bind_out)) {
+            fprintf(stderr, " mysql_stmt_bind_result() falhou: %s\n", mysql_stmt_error(stmt));
+        } else {
+            if (mysql_stmt_fetch(stmt) == 0) {
+                // SUCESSO! Salva nas variáveis globais
+                g_id_usuario_logado = id_usuario_out;
+                strcpy(g_nome_nivel_logado, nome_nivel_out);
+            }
+        }
     }
-    
-    // Se num_rows for 0, login_sucesso permanece 0 (falha)
+
     mysql_stmt_close(stmt);
     mysql_close(con);
 
-    return login_sucesso;
+    return g_id_usuario_logado; // Retorna o ID (ou 0 se falhou)
 }
 
 //funcao para buscar ID do tipo e pais
@@ -703,6 +767,11 @@ void criarVinho() {
 
     // Obter o ID do vinho que acabamos de criar
     long long novo_id_vinho = mysql_insert_id(con);
+    //registro de LOG
+    char log_msg[256];
+    sprintf(log_msg, "CRIOU VINHO: ID %lld (%s)", novo_id_vinho, v.nome_vinho);
+    registrarLog(log_msg);
+
     // Fechar o statement do vinho
     mysql_stmt_close(stmt);
 
@@ -751,24 +820,32 @@ void listarVinhos() {
     }
 
     MYSQL_ROW row;
-    int num_rows = mysql_num_rows(result); // Pega o número de linhas
+    int num_rows = mysql_num_rows(result);  // Pega o número de linhas
 
     printf("\n>>> Lista de Vinhos (Apenas Ativos) <<<\n");
     if (num_rows == 0) {
         printf("Nenhum vinho ativo cadastrado.\n");
     } else {
-        printf("%-5s %-30s %-5s %-10s %-5s\n", "ID", "Nome", "Safra", "Preco", "Qtd.");
-        printf("-------------------------------------------------------------------\n");
+        // --- INÍCIO DA CORREÇÃO ---
+        // Cabeçalho corrigido para 8 colunas
+        printf("%-3s | %-25s | %-5s | %-10s | %-3s | %-15s | %-15s | %-20s\n", 
+               "ID", "Nome", "Safra", "Preco", "Qtd", "Tipo", "Pais", "Uvas");
+        printf("----------------------------------------------------------------------------------------------------------------------\n");
 
         while ((row = mysql_fetch_row(result))) {
-            printf("%-5s %-30s %-5s %-10s %-5s\n",
-                   row[0] ? row[0] : "NULL",
-                   row[1] ? row[1] : "NULL",
-                   row[2] ? row[2] : "NULL",
-                   row[3] ? row[3] : "NULL",
-                   row[4] ? row[4] : "NULL");
+            // Loop corrigido para imprimir row[0] até row[7]
+            printf("%-3s | %-25s | %-5s | %-10s | %-3s | %-15s | %-15s | %-20s\n",
+                   row[0] ? row[0] : "N/A", // ID
+                   row[1] ? row[1] : "N/A", // Nome
+                   row[2] ? row[2] : "N/A", // Safra
+                   row[3] ? row[3] : "N/A", // Preco
+                   row[4] ? row[4] : "N/A", // Qtd
+                   row[5] ? row[5] : "N/A", // Tipo
+                   row[6] ? row[6] : "N/A", // Pais
+                   row[7] ? row[7] : "N/A"); // Uvas
         }
-        printf("-------------------------------------------------------------------\n");
+        printf("----------------------------------------------------------------------------------------------------------------------\n");
+        // --- FIM DA CORREÇÃO ---
     }
 
     mysql_free_result(result);
@@ -776,30 +853,61 @@ void listarVinhos() {
 }
 
 //UPDATE
+// ==========================================================
+// FUNÇÃO ATUALIZAR VINHO (Corrigida com Validação e Cancelamento)
+// ==========================================================
 void atualizarVinho() {
-    int id_busca;
-    Vinho v; // Struct para armazenar os novos dados
-    MYSQL *con = conectar_db();
+    int id_busca = 0; // O ID do vinho que vamos atualizar
+    Vinho v;
+    MYSQL *con = NULL; // Inicia a conexão como NULA
     MYSQL_STMT *stmt;
-    MYSQL_BIND bind[7]; // 6 campos SET + 1 ID para o WHERE
+    MYSQL_BIND bind[7];
     char query[] = "UPDATE vinho SET nome_vinho = ?, safra = ?, preco = ?, quantidade = ?, fk_tipo_id_tipo = ?, fk_paisorigem_id_paisorigem = ? WHERE id_vinho = ?";
 
-    // Buffers para os nomes
+    // Buffers para validação de ID
     char input_buffer[101];
     long id_digitado = 0;
     char *end_ptr;
+    
+    // Buffers para nomes (tipo/país)
+    char nome_tipo[51];
+    char nome_pais[101];
     int id_tipo_encontrado;
     int id_pais_encontrado;
     char resposta;
 
-    // 1. Coletar ID do Vinho
-    printf("Digite o ID do Vinho que deseja atualizar: ");
-    scanf("%d", &id_busca);
+    // --- 1. MOSTRAR OS VINHOS PRIMEIRO ---
+    limparTela();
+    printf("\n--- ATUALIZAR VINHO ---\n");
+    printf("Estes são os vinhos ativos que podem ser atualizados:\n\n");
+    listarVinhos(); // Esta função abre e fecha a própria conexão
+
+    // --- 2. COLETAR E VALIDAR O ID ---
+    printf("\nDigite o ID do Vinho que deseja atualizar (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
     while(getchar() != '\n'); 
 
+    // Tenta converter a string para um número
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    // Validação:
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        return; // Retorna ao menu
+    }
+    
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        return; // Retorna ao menu
+    }
+    
+    id_busca = (int)id_digitado; // O ID é válido
+
+    // --- 3. SE O ID FOR VÁLIDO, CONECTA AO DB E CONTINUA ---
+    con = conectar_db();
+    
     printf("\n>>> Insira os NOVOS dados para o Vinho ID %d <<<\n", id_busca);
     
-    // 2. Coletar dados básicos
     printf("Novo Nome: ");
     scanf("%150[^\n]", v.nome_vinho);
     while(getchar() != '\n');
@@ -807,36 +915,36 @@ void atualizarVinho() {
     printf("Nova Safra (Ano): ");
     scanf("%d", &v.safra);
 
-    printf("Novo Preco: ");
+    printf("Novo Preco (ex: 59.99): ");
     scanf("%lf", &v.preco);
 
     printf("Nova Quantidade: ");
     scanf("%d", &v.quantidade);
-    while(getchar() != '\n'); // Limpa buffer
+    while(getchar() != '\n');
 
-    // --- 3. Coletar e Validar NOVO Tipo ---
+    // --- 4. Coletar e Validar NOVO Tipo ---
     printf("\n--- Selecao do NOVO Tipo ---\n");
-    listarTipos(con); // Mostra a lista de tipos existentes
-    printf("Digite o NOME do novo Tipo: ");
-    scanf("%100[^\n]", input_buffer);
+    listarTipos(con); // Passa a conexão
+    printf("Digite o NOME ou o ID do novo Tipo: ");
+    scanf("%100[^\n]", input_buffer); // Reusa o buffer
     while(getchar() != '\n');
     
     id_digitado = strtol(input_buffer, &end_ptr, 10);
     
-    if (end_ptr == input_buffer) {
+    if (end_ptr == input_buffer) { // É um NOME
         id_tipo_encontrado = obter_id_pelo_nome(con, "tipo", "id_tipo", "nome_tipo", input_buffer);
-    } else if (*end_ptr == '\0') {
+    } else if (*end_ptr == '\0') { // É um ID
         if (verificar_id_ativo(con, "tipo", "id_tipo", (int)id_digitado)) {
             id_tipo_encontrado = (int)id_digitado;
         } else {
             id_tipo_encontrado = -1;
         }
-    } else {
+    } else { // É misto (inválido)
         id_tipo_encontrado = -1;
     }
 
     if (id_tipo_encontrado == -1) {
-        if (end_ptr == input_buffer) { 
+        if (end_ptr == input_buffer) { // Se a falha foi por NOME não encontrado
             printf("Tipo '%s' nao encontrado.\n", input_buffer);
             printf("Deseja cadastra-lo agora? (s/n): ");
             scanf(" %c", &resposta);
@@ -854,37 +962,37 @@ void atualizarVinho() {
                 mysql_close(con);
                 return;
             }
-        } else {
+        } else { // Se a falha foi por ID inválido ou misto
             printf("ID ou entrada invalida. Atualizacao abortada.\n");
             mysql_close(con);
             return;
         }
     }
-    v.fk_tipo_id_tipo = id_tipo_encontrado; // Armazena o ID encontrado
+    v.fk_tipo_id_tipo = id_tipo_encontrado;
 
-    // --- 4. Coletar e Validar NOVO País ---
+    // --- 5. Coletar e Validar NOVO País ---
     printf("\n--- Selecao do NOVO Pais ---\n");
-    listarPaises(con); // Mostra a lista de países existentes
-    printf("Digite o NOME do novo Pais de Origem: ");
-    scanf("%100[^\n]", input_buffer);
+    listarPaises(con); // Passa a conexão
+    printf("Digite o NOME ou o ID do novo Pais de Origem: ");
+    scanf("%100[^\n]", input_buffer); // Reusa o buffer
     while(getchar() != '\n');
     
     id_digitado = strtol(input_buffer, &end_ptr, 10);
-
-    if (end_ptr == input_buffer) {
+    
+    if (end_ptr == input_buffer) { // É um NOME
         id_pais_encontrado = obter_id_pelo_nome(con, "paisorigem", "id_paisorigem", "nome_pais", input_buffer);
-    } else if (*end_ptr == '\0') {
+    } else if (*end_ptr == '\0') { // É um ID
         if (verificar_id_ativo(con, "paisorigem", "id_paisorigem", (int)id_digitado)) {
             id_pais_encontrado = (int)id_digitado;
         } else {
             id_pais_encontrado = -1;
         }
-    } else {
+    } else { // É misto (inválido)
         id_pais_encontrado = -1;
     }
 
     if (id_pais_encontrado == -1) {
-        if (end_ptr == input_buffer) { 
+        if (end_ptr == input_buffer) { // Se a falha foi por NOME não encontrado
             printf("Pais '%s' nao encontrado.\n", input_buffer);
             printf("Deseja cadastra-lo agora? (s/n): ");
             scanf(" %c", &resposta);
@@ -902,16 +1010,15 @@ void atualizarVinho() {
                 mysql_close(con);
                 return;
             }
-        } else {
+        } else { // Se a falha foi por ID inválido ou misto
             printf("ID ou entrada invalida. Atualizacao abortada.\n");
             mysql_close(con);
             return;
         }
     }
-    v.fk_paisorigem_id_paisorigem = id_pais_encontrado; // Armazena o ID encontrado
+    v.fk_paisorigem_id_paisorigem = id_pais_encontrado;
 
-
-    // --- 5. Preparar e Executar o UPDATE ---
+    // --- 6. Preparar e Executar o UPDATE ---
     stmt = mysql_stmt_init(con);
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
@@ -926,28 +1033,21 @@ void atualizarVinho() {
         return;
     }
 
-    // 6. Associar (Bind) os 7 parâmetros
+    // Bind dos 7 parâmetros
     memset(bind, 0, sizeof(bind));
-    // Param 0: nome_vinho
     bind[0].buffer_type = MYSQL_TYPE_STRING;
     bind[0].buffer = (char *)v.nome_vinho;
     bind[0].buffer_length = strlen(v.nome_vinho);
-    // Param 1: safra
     bind[1].buffer_type = MYSQL_TYPE_LONG;
     bind[1].buffer = (char *)&v.safra;
-    // Param 2: preco
     bind[2].buffer_type = MYSQL_TYPE_DOUBLE;
     bind[2].buffer = (char *)&v.preco;
-    // Param 3: quantidade
     bind[3].buffer_type = MYSQL_TYPE_LONG;
     bind[3].buffer = (char *)&v.quantidade;
-    // Param 4: fk_tipo (O ID que buscamos)
     bind[4].buffer_type = MYSQL_TYPE_LONG;
     bind[4].buffer = (char *)&v.fk_tipo_id_tipo;
-    // Param 5: fk_pais (O ID que buscamos)
     bind[5].buffer_type = MYSQL_TYPE_LONG;
     bind[5].buffer = (char *)&v.fk_paisorigem_id_paisorigem;
-    // Param 6: id_vinho (O ID do WHERE)
     bind[6].buffer_type = MYSQL_TYPE_LONG;
     bind[6].buffer = (char *)&id_busca;
 
@@ -955,10 +1055,9 @@ void atualizarVinho() {
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
         mysql_close(con);
-        return; 
+        return;
     }
 
-    // 7. Executar
     if (mysql_stmt_execute(stmt)) {
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -966,41 +1065,72 @@ void atualizarVinho() {
         return;
     }
 
-    // 8. Verificar se funcionou
     if (mysql_stmt_affected_rows(stmt) > 0) {
-        printf("\n>>> Vinho ID %d atualizado com sucesso! <<<\n", id_busca);
+        printf("\n>>> Dados principais do Vinho ID %d atualizados! <<<\n", id_busca);
+        //registro de LOG
+        char log_msg[512];
+        sprintf(log_msg, "ATUALIZOU VINHO (DADOS): ID %d para Nome: %s, Safra: %d, Preco: %.2f, Qtd: %d", 
+                id_busca, v.nome_vinho, v.safra, v.preco, v.quantidade);
+        registrarLog(log_msg);
     } else {
-        printf("\n>>> Vinho com ID %d nao foi encontrado (nenhuma alteracao feita). <<<\n", id_busca);
+        printf("\n>>> Vinho com ID %d nao foi encontrado ou nenhum dado foi alterado. <<<\n", id_busca);
     }
 
-    mysql_stmt_close(stmt); // Fecha o statement do UPDATE
+    mysql_stmt_close(stmt);
 
-    // --- 9. NOVO: Gerenciar Uvas ---
+    // --- 7. Gerenciar Uvas ---
     printf("\n--- Gerenciamento de Uvas para o Vinho ID %d ---\n", id_busca);
     limparUvasDoVinho(con, id_busca); // Limpa as uvas antigas
     gerenciarUvasDoVinho(con, id_busca); // Adiciona as novas
 
-    mysql_close(con);
+    mysql_close(con); // <--- FECHA A CONEXÃO ÚNICA
 }
 
 //DELETE(DESATIVAR)
+// ==========================================================
+// FUNÇÃO DESATIVAR VINHO (com Validação e Cancelamento)
+// ==========================================================
 void desativarVinho() {
-    int id_busca;
-    MYSQL *con = conectar_db();
+    int id_busca = 0;
+    MYSQL *con = NULL;
     MYSQL_STMT *stmt;
     MYSQL_BIND bind[1];
-    
-    // A query mudou de DELETE para UPDATE
     char query[] = "UPDATE vinho SET ativo = 0 WHERE id_vinho = ?";
 
-    // 1. Coletar ID
-    printf("Digite o ID do Vinho que deseja DESATIVAR: "); // Mensagem atualizada
-    scanf("%d", &id_busca);
-    while(getchar() != '\n');
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
 
-    // 2. Preparar
+    // --- 1. MOSTRAR OS VINHOS PRIMEIRO ---
+    limparTela();
+    printf("\n--- DESATIVAR VINHO ---\n");
+    printf("Estes são os vinhos ativos que podem ser desativados:\n\n");
+    listarVinhos(); // Esta função (pelo seu código) abre/fecha a própria conexão
+
+    // --- 2. COLETAR E VALIDAR O ID ---
+    printf("\nDigite o ID do Vinho que deseja DESATIVAR (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
+    while(getchar() != '\n'); 
+
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        return; // Retorna ao menu
+    }
+    
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        return; // Retorna ao menu
+    }
+    
+    id_busca = (int)id_digitado;
+
+    // --- 3. SE O ID FOR VÁLIDO, CONECTA AO DB E EXECUTA ---
+    con = conectar_db();
+    
     stmt = mysql_stmt_init(con);
-    // Tratamento de erro do init
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
         mysql_close(con);
@@ -1014,7 +1144,6 @@ void desativarVinho() {
         return;
     }
 
-    // 3. Associar (Bind)
     memset(bind, 0, sizeof(bind));
     bind[0].buffer_type = MYSQL_TYPE_LONG;
     bind[0].buffer = (char *)&id_busca;
@@ -1026,22 +1155,21 @@ void desativarVinho() {
         return;
     }
 
-    // 4. Executar
     if (mysql_stmt_execute(stmt)) {
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
-        mysql_stmt_close(stmt);
-        mysql_close(con);
-        return;
-    }
-
-    // 5. Verificar
-    if (mysql_stmt_affected_rows(stmt) > 0) {
-        printf("Vinho desativado com sucesso!\n"); // Mensagem atualizada
     } else {
-        printf("Vinho com ID %d nao foi encontrado.\n", id_busca);
+        if (mysql_stmt_affected_rows(stmt) > 0) {
+            printf("\nVinho ID %d desativado com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "DESATIVOU VINHO: ID %d", id_busca);
+            registrarLog(log_msg);
+
+        } else {
+            printf("\nVinho com ID %d nao foi encontrado ou ja esta desativado.\n", id_busca);
+        }
     }
 
-    // 6. Limpar
     mysql_stmt_close(stmt);
     mysql_close(con);
 }
@@ -1132,6 +1260,10 @@ void criarTipo() {
         }
     } else {
         printf("Tipo '%s' criado com sucesso!\n", nome_tipo);
+        //registro de LOG
+        char log_msg[256];
+        sprintf(log_msg, "CRIOU TIPO: %s", nome_tipo);
+        registrarLog(log_msg);
     }
 
     mysql_stmt_close(stmt);
@@ -1139,22 +1271,50 @@ void criarTipo() {
 }
 
 void atualizarTipo() {
-    MYSQL *con = conectar_db();
+    MYSQL *con = conectar_db(); // Abre a conexão
     MYSQL_STMT *stmt;
     MYSQL_BIND bind[2];
     int id_tipo;
     char nome_tipo[51];
     char query[] = "UPDATE tipo SET nome_tipo = ? WHERE id_tipo = ?";
 
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
+
+    limparTela();
     printf("\n--- Atualizar Tipo ---\n");
-    printf("ID do Tipo a atualizar: ");
-    scanf("%d", &id_tipo);
+    
+    // 1. Listar os tipos
+    listarTipos(con); 
+
+    // 2. Coletar e Validar ID
+    printf("\nDigite o ID do Tipo a atualizar (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
     while(getchar() != '\n');
 
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        mysql_close(con);
+        return;
+    }
+
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        mysql_close(con);
+        return;
+    }
+    id_tipo = (int)id_digitado;
+
+    // 3. Coletar Novo Nome
     printf("Novo Nome: ");
     scanf("%50[^\n]", nome_tipo);
     while(getchar() != '\n');
 
+    // 4. Executar o UPDATE
     stmt = mysql_stmt_init(con);
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
@@ -1162,7 +1322,6 @@ void atualizarTipo() {
         return;
     }
 
-    // Erro no PREPARE
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         fprintf(stderr, " mysql_stmt_prepare() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1177,7 +1336,6 @@ void atualizarTipo() {
     bind[1].buffer_type = MYSQL_TYPE_LONG;
     bind[1].buffer = (char *)&id_tipo;
 
-    // Erro no BIND
     if (mysql_stmt_bind_param(stmt, bind)) {
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1185,18 +1343,19 @@ void atualizarTipo() {
         return;
     }
 
-    // Erro no EXECUTE
     if (mysql_stmt_execute(stmt)) {
-        // Verifica se o erro foi por entrada duplicada (Erro 1062)
         if (mysql_errno(con) == 1062) {
             fprintf(stderr, "\nErro: O nome de tipo '%s' ja esta em uso.\n", nome_tipo);
         } else {
-            // Outro erro qualquer
             fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
         }
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("Tipo atualizado com sucesso!\n");
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "ATUALIZOU TIPO: ID %d para '%s'", id_tipo, nome_tipo);
+            registrarLog(log_msg);
         } else {
             printf("ID do Tipo nao encontrado ou nenhum dado foi alterado.\n");
         }
@@ -1206,17 +1365,45 @@ void atualizarTipo() {
 }
 
 void desativarTipo() {
-    MYSQL *con = conectar_db();
+    int id_busca = 0;
+    MYSQL *con = conectar_db(); // Abre a conexão UMA VEZ
     MYSQL_STMT *stmt;
     MYSQL_BIND bind[1];
-    int id_tipo;
     char query[] = "UPDATE tipo SET ativo = 0 WHERE id_tipo = ?";
 
-    printf("\n--- Desativar Tipo ---\n");
-    printf("ID do Tipo a desativar: ");
-    scanf("%d", &id_tipo);
-    while(getchar() != '\n');
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
 
+    // --- 1. MOSTRAR OS TIPOS PRIMEIRO ---
+    limparTela();
+    printf("\n--- DESATIVAR TIPO ---\n");
+    printf("Estes são os tipos ativos que podem ser desativados:\n\n");
+    listarTipos(con); // Passa a conexão
+
+    // --- 2. COLETAR E VALIDAR O ID ---
+    printf("\nDigite o ID do Tipo que deseja DESATIVAR (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
+    while(getchar() != '\n'); 
+
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        mysql_close(con);
+        return;
+    }
+    
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        mysql_close(con);
+        return;
+    }
+    
+    id_busca = (int)id_digitado;
+
+    // --- 3. SE O ID FOR VÁLIDO, EXECUTA O UPDATE ---
     stmt = mysql_stmt_init(con);
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
@@ -1224,7 +1411,6 @@ void desativarTipo() {
         return;
     }
 
-    // Erro no PREPARE
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         fprintf(stderr, " mysql_stmt_prepare() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1234,9 +1420,8 @@ void desativarTipo() {
     
     memset(bind, 0, sizeof(bind));
     bind[0].buffer_type = MYSQL_TYPE_LONG;
-    bind[0].buffer = (char *)&id_tipo;
+    bind[0].buffer = (char *)&id_busca;
 
-    // Erro no BIND
     if (mysql_stmt_bind_param(stmt, bind)) {
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1244,15 +1429,17 @@ void desativarTipo() {
         return;
     }
 
-    // Erro no EXECUTE
     if (mysql_stmt_execute(stmt)) { 
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
     } else {
-        // Se a execução foi SUCESSO, verifica as linhas
         if (mysql_stmt_affected_rows(stmt) > 0) {
-            printf("Tipo desativado com sucesso!\n");
+            printf("\nTipo ID %d desativado com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "DESATIVOU TIPO: ID %d", id_busca); // id_busca é o ID
+            registrarLog(log_msg);
         } else {
-            printf("ID do Tipo nao encontrado ou ja esta desativado.\n");
+            printf("\nTipo com ID %d nao foi encontrado ou ja esta desativado.\n", id_busca);
         }
     }
     mysql_stmt_close(stmt);
@@ -1387,29 +1574,61 @@ void criarPais() {
             fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
         }
     } else {
-        printf("Pais '%s' criado com sucesso!\n", nome_pais);  
+        printf("Pais '%s' criado com sucesso!\n", nome_pais);
+        //registro de LOG
+        char log_msg[256];
+        sprintf(log_msg, "CRIOU PAIS: %s", nome_pais);
+        registrarLog(log_msg);  
     }
     mysql_stmt_close(stmt);
     mysql_close(con);
 }
 
 void atualizarPais() {
-    MYSQL *con = conectar_db();
+    MYSQL *con = conectar_db(); // Abre a conexão
     MYSQL_STMT *stmt;
     MYSQL_BIND bind[2];
     int id_pais;
     char nome_pais[101];
     char query[] = "UPDATE paisorigem SET nome_pais = ? WHERE id_paisorigem = ?";
 
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
+
+    limparTela();
     printf("\n--- Atualizar Pais ---\n");
-    printf("ID do Pais a atualizar: ");
-    scanf("%d", &id_pais);
+
+    // 1. Listar Países
+    listarPaises(con);
+
+    // 2. Coletar e Validar ID
+    printf("\nDigite o ID do Pais a atualizar (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
     while(getchar() != '\n');
 
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        mysql_close(con);
+        return;
+    }
+
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        mysql_close(con);
+        return;
+    }
+    id_pais = (int)id_digitado;
+
+    // 3. Coletar Novo Nome
     printf("Novo Nome: ");
     scanf("%100[^\n]", nome_pais);
     while(getchar() != '\n');
 
+    // 4. Executar o UPDATE
     stmt = mysql_stmt_init(con);
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
@@ -1417,7 +1636,6 @@ void atualizarPais() {
         return;
     }
 
-    // Erro no PREPARE
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         fprintf(stderr, " mysql_stmt_prepare() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1432,7 +1650,6 @@ void atualizarPais() {
     bind[1].buffer_type = MYSQL_TYPE_LONG;
     bind[1].buffer = (char *)&id_pais;
 
-    // Erro no BIND
     if (mysql_stmt_bind_param(stmt, bind)) {
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1440,18 +1657,19 @@ void atualizarPais() {
         return;
     }
 
-    // Erro no EXECUTE
     if (mysql_stmt_execute(stmt)) {
-        // Verifica se o erro foi por entrada duplicada (Erro 1062)
         if (mysql_errno(con) == 1062) {
             fprintf(stderr, "\nErro: O nome de pais '%s' ja esta em uso.\n", nome_pais);
         } else {
-            // Outro erro qualquer
             fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
         }
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("Pais atualizado com sucesso!\n");
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "ATUALIZOU PAIS: ID %d para '%s'", id_pais, nome_pais);
+            registrarLog(log_msg);
         } else {
             printf("ID do Pais nao encontrado ou nenhum dado foi alterado.\n");
         }
@@ -1461,17 +1679,45 @@ void atualizarPais() {
 }
 
 void desativarPais() {
-    MYSQL *con = conectar_db();
+    int id_busca = 0;
+    MYSQL *con = conectar_db(); // Abre a conexão UMA VEZ
     MYSQL_STMT *stmt;
     MYSQL_BIND bind[1];
-    int id_pais;
     char query[] = "UPDATE paisorigem SET ativo = 0 WHERE id_paisorigem = ?";
 
-    printf("\n--- Desativar Pais ---\n");
-    printf("ID do Pais a desativar: ");
-    scanf("%d", &id_pais);
-    while(getchar() != '\n');
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
 
+    // --- 1. MOSTRAR OS PAÍSES PRIMEIRO ---
+    limparTela();
+    printf("\n--- DESATIVAR PAIS ---\n");
+    printf("Estes são os paises ativos que podem ser desativados:\n\n");
+    listarPaises(con); // Passa a conexão
+
+    // --- 2. COLETAR E VALIDAR O ID ---
+    printf("\nDigite o ID do Pais que deseja DESATIVAR (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
+    while(getchar() != '\n'); 
+
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        mysql_close(con);
+        return;
+    }
+    
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        mysql_close(con);
+        return;
+    }
+    
+    id_busca = (int)id_digitado;
+
+    // --- 3. SE O ID FOR VÁLIDO, EXECUTA O UPDATE ---
     stmt = mysql_stmt_init(con);
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
@@ -1479,19 +1725,17 @@ void desativarPais() {
         return;
     }
 
-    // Erro no PREPARE
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         fprintf(stderr, " mysql_stmt_prepare() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
         mysql_close(con);
-        return; // Sai da função
+        return;
     }
     
     memset(bind, 0, sizeof(bind));
     bind[0].buffer_type = MYSQL_TYPE_LONG;
-    bind[0].buffer = (char *)&id_pais;
+    bind[0].buffer = (char *)&id_busca;
 
-    // Erro no BIND
     if (mysql_stmt_bind_param(stmt, bind)) {
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
@@ -1499,15 +1743,17 @@ void desativarPais() {
         return;
     }
 
-    // Erro no EXECUTE
     if (mysql_stmt_execute(stmt)) {
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
     } else {
-        // Se a execução foi SUCESSO, verifica as linhas
         if (mysql_stmt_affected_rows(stmt) > 0) {
-            printf("Pais desativado com sucesso!\n");
+            printf("\nPais ID %d desativado com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "DESATIVOU PAIS: ID %d", id_busca);
+            registrarLog(log_msg);
         } else {
-            printf("ID do Pais nao encontrado ou ja esta desativado.\n");
+            printf("\nPais com ID %d nao foi encontrado ou ja esta desativado.\n", id_busca);
         }
     }
     mysql_stmt_close(stmt);
@@ -1609,6 +1855,10 @@ void criarUva() {
         }
     } else {
         printf("Uva '%s' criada com sucesso!\n", nome_uva);
+        //registro de LOG
+        char log_msg[256];
+        sprintf(log_msg, "CRIOU UVA: %s", nome_uva);
+        registrarLog(log_msg);
     }
     
     mysql_stmt_close(stmt);
@@ -1698,6 +1948,10 @@ void atualizarUva() {
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("Uva atualizada com sucesso!\n");
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "ATUALIZOU UVA: ID %d para '%s'", id_uva, nome_uva);
+            registrarLog(log_msg);
         } else {
             printf("ID da Uva nao encontrado ou nenhum dado foi alterado.\n");
         }
@@ -1707,17 +1961,45 @@ void atualizarUva() {
 }
 
 void desativarUva() {
-    MYSQL *con = conectar_db();
+    int id_busca = 0;
+    MYSQL *con = conectar_db(); // Abre a conexão UMA VEZ
     MYSQL_STMT *stmt;
     MYSQL_BIND bind[1];
-    int id_uva;
     char query[] = "UPDATE uva SET ativo = 0 WHERE id_uva = ?";
 
-    printf("\n--- Desativar Uva ---\n");
-    printf("ID da Uva a desativar: ");
-    scanf("%d", &id_uva);
-    while(getchar() != '\n');
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
 
+    // --- 1. MOSTRAR AS UVAS PRIMEIRO ---
+    limparTela();
+    printf("\n--- DESATIVAR UVA ---\n");
+    printf("Estas são as uvas ativas que podem ser desativadas:\n\n");
+    listarUvas(con); // Passa a conexão
+
+    // --- 2. COLETAR E VALIDAR O ID ---
+    printf("\nDigite o ID da Uva que deseja DESATIVAR (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
+    while(getchar() != '\n'); 
+
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        mysql_close(con);
+        return;
+    }
+    
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        mysql_close(con);
+        return;
+    }
+    
+    id_busca = (int)id_digitado;
+
+    // --- 3. SE O ID FOR VÁLIDO, EXECUTA O UPDATE ---
     stmt = mysql_stmt_init(con);
     if (!stmt) {
         fprintf(stderr, " mysql_stmt_init() falhou\n");
@@ -1734,7 +2016,7 @@ void desativarUva() {
     
     memset(bind, 0, sizeof(bind));
     bind[0].buffer_type = MYSQL_TYPE_LONG;
-    bind[0].buffer = (char *)&id_uva;
+    bind[0].buffer = (char *)&id_busca;
 
     if (mysql_stmt_bind_param(stmt, bind)) {
         fprintf(stderr, " mysql_stmt_bind_param() falhou: %s\n", mysql_stmt_error(stmt));
@@ -1747,9 +2029,13 @@ void desativarUva() {
         fprintf(stderr, " mysql_stmt_execute() falhou: %s\n", mysql_stmt_error(stmt));
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
-            printf("Uva desativada com sucesso!\n");
+            printf("\nUva ID %d desativada com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "DESATIVOU UVA: ID %d", id_busca); // id_busca é o ID
+            registrarLog(log_msg);
         } else {
-            printf("ID da Uva nao encontrado ou ja esta desativada.\n");
+            printf("\nUva com ID %d nao foi encontrada ou ja esta desativada.\n", id_busca);
         }
     }
     mysql_stmt_close(stmt);
@@ -1838,6 +2124,11 @@ void limparUvasDoVinho(MYSQL *con, int id_vinho) {
     }
     
     printf("\n... Uvas anteriores do Vinho ID %d removidas (para atualizacao).\n", id_vinho);
+    //registro de LOG
+    char log_msg[256];
+    sprintf(log_msg, "REMOVEU UVAS (UPDATE): Todas as uvas do Vinho ID %d", id_vinho);
+    registrarLog(log_msg);
+
     mysql_stmt_close(stmt);
 }
 
@@ -1936,6 +2227,10 @@ void gerenciarUvasDoVinho(MYSQL *con, int id_vinho) {
                 }
             } else {
                 printf("\n... Uva (ID: %d) adicionada ao vinho (ID: %d) com sucesso!\n", id_uva_encontrada, id_vinho);
+                //registro de LOG
+                char log_msg[256];
+                sprintf(log_msg, "ASSOCIACAO VINHO-UVA: Vinho ID %d <- Uva ID %d", id_vinho, id_uva_encontrada);
+                registrarLog(log_msg);
             }
             mysql_stmt_close(stmt_junction);
         }
@@ -2098,6 +2393,10 @@ void reativarVinho() {
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("\nVinho ID %d reativado com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "REATIVOU VINHO: ID %d", id_busca);
+            registrarLog(log_msg);
         } else {
             printf("\nVinho com ID %d nao foi encontrado na lista de inativos.\n", id_busca);
         }
@@ -2196,6 +2495,10 @@ void reativarTipo() {
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("\nTipo ID %d reativado com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "REATIVOU TIPO: ID %d", id_busca);
+            registrarLog(log_msg);
         } else {
             printf("\nTipo com ID %d nao foi encontrado na lista de inativos.\n", id_busca);
         }
@@ -2293,6 +2596,10 @@ void reativarPais() {
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("\nPais ID %d reativado com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "REATIVOU PAIS: ID %d", id_busca);
+            registrarLog(log_msg);
         } else {
             printf("\nPais com ID %d nao foi encontrado na lista de inativos.\n", id_busca);
         }
@@ -2390,12 +2697,405 @@ void reativarUva() {
     } else {
         if (mysql_stmt_affected_rows(stmt) > 0) {
             printf("\nUva ID %d reativada com sucesso!\n", id_busca);
+            //registro de LOG
+            char log_msg[256];
+            sprintf(log_msg, "REATIVOU UVA: ID %d", id_busca);
+            registrarLog(log_msg);
         } else {
             printf("\nUva com ID %d nao foi encontrada na lista de inativos.\n", id_busca);
         }
     }
     mysql_stmt_close(stmt);
     mysql_close(con);
+}
+
+/*
+ * Menu para Movimentações de Estoque
+ */
+void menuMovimentacoes() {
+    int opcao;
+    do {
+        limparTela();
+        printf("\n--- MOVIMENTAR ESTOQUE ---\n");
+        printf("1. Registrar Saida (Venda)\n");
+        printf("2. Registrar Entrada (Compra)\n");
+        printf("0. Voltar ao Menu Principal\n");
+        printf("Escolha uma opcao: ");
+        scanf("%d", &opcao);
+        while(getchar() != '\n');
+
+        switch (opcao) {
+            case 1: 
+                registrarSaida(); // Função de Venda
+                pausarTela(); 
+                break;
+            case 2: 
+                // Futuramente, você pode criar a função registrarEntrada()
+                printf("Funcao 'Registrar Entrada' ainda nao implementada.\n");
+                pausarTela(); 
+                break;
+            case 0: 
+                printf("Voltando...\n"); 
+                break;
+            default: 
+                printf("Opcao invalida!\n");
+                pausarTela();
+                break;
+        }
+    } while (opcao != 0);
+}
+
+void registrarSaida() {
+    int id_vinho = 0;
+    int quantidade_venda = 0;
+    char nome_cliente[101];
+
+    MYSQL *con = NULL;
+    MYSQL_STMT *stmt;
+    MYSQL_BIND bind[3];
+
+    // Buffers para validação
+    char input_buffer[101];
+    long id_digitado = 0;
+    char *end_ptr;
+
+    // --- 1. MOSTRAR OS VINHOS ---
+    limparTela();
+    printf("\n--- REGISTRAR SAIDA (VENDA) ---\n");
+    listarVinhos(); // Mostra os vinhos (abre/fecha conexão própria)
+
+    // --- 2. COLETAR E VALIDAR O ID DO VINHO ---
+    printf("\nDigite o ID do Vinho a ser vendido (ou 0 para cancelar): ");
+    scanf("%100[^\n]", input_buffer);
+    while(getchar() != '\n'); 
+
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+    if (end_ptr == input_buffer || *end_ptr != '\0') {
+        printf("\nErro: Entrada invalida. Apenas numeros sao permitidos.\n");
+        return;
+    }
+    if (id_digitado == 0) {
+        printf("Operacao cancelada.\n");
+        return;
+    }
+    id_vinho = (int)id_digitado;
+
+    // --- 3. COLETAR E VALIDAR QUANTIDADE ---
+    printf("Digite a quantidade a ser vendida: ");
+    scanf("%100[^\n]", input_buffer);
+    while(getchar() != '\n'); 
+
+    id_digitado = strtol(input_buffer, &end_ptr, 10);
+    if (end_ptr == input_buffer || *end_ptr != '\0' || id_digitado <= 0) {
+        printf("\nErro: Quantidade invalida. Deve ser um numero maior que zero.\n");
+        return;
+    }
+    quantidade_venda = (int)id_digitado;
+
+    // --- 4. COLETAR NOME DO CLIENTE (Apenas para o resumo) ---
+    printf("Digite o nome do Cliente (para o recibo): ");
+    scanf("%100[^\n]", nome_cliente);
+    while(getchar() != '\n'); 
+
+    // --- 5. EXECUTAR TRANSAÇÃO ---
+    con = conectar_db();
+    
+    // Precisamos buscar o preço e o nome do vinho ANTES de atualizar
+    char nome_vinho[151];
+    double preco_vinho = 0;
+    int qtd_estoque = 0;
+    
+    // 5a. Buscar dados e verificar estoque
+    char query_select[] = "SELECT nome_vinho, preco, quantidade FROM vinho WHERE id_vinho = ? AND ativo = 1";
+    stmt = mysql_stmt_init(con);
+    if (mysql_stmt_prepare(stmt, query_select, strlen(query_select))) { /* ... (erro) ... */ }
+    
+    memset(bind, 0, sizeof(bind));
+    bind[0].buffer_type = MYSQL_TYPE_LONG;
+    bind[0].buffer = (char *)&id_vinho;
+    mysql_stmt_bind_param(stmt, bind);
+    mysql_stmt_execute(stmt);
+    
+    mysql_stmt_store_result(stmt);
+    if (mysql_stmt_num_rows(stmt) == 0) {
+        printf("\nErro: Vinho com ID %d nao encontrado ou esta inativo.\n", id_vinho);
+        mysql_stmt_close(stmt);
+        mysql_close(con);
+        return;
+    }
+
+    // Bind dos resultados
+    MYSQL_BIND bind_out[3];
+    memset(bind_out, 0, sizeof(bind_out));
+    bind_out[0].buffer_type = MYSQL_TYPE_STRING;
+    bind_out[0].buffer = nome_vinho;
+    bind_out[0].buffer_length = 151;
+    bind_out[1].buffer_type = MYSQL_TYPE_DOUBLE;
+    bind_out[1].buffer = (char *)&preco_vinho;
+    bind_out[2].buffer_type = MYSQL_TYPE_LONG;
+    bind_out[2].buffer = (char *)&qtd_estoque;
+    
+    mysql_stmt_bind_result(stmt, bind_out);
+    mysql_stmt_fetch(stmt);
+    mysql_stmt_close(stmt); // Fecha o statement do SELECT
+
+    // 5b. Validar estoque
+    if (quantidade_venda > qtd_estoque) {
+        printf("\nErro: Estoque insuficiente!\n");
+        printf("Disponivel: %d | Solicitado: %d\n", qtd_estoque, quantidade_venda);
+        mysql_close(con);
+        return;
+    }
+
+    // 5c. Atualizar o estoque (UPDATE na tabela 'vinho')
+    char query_update[] = "UPDATE vinho SET quantidade = (quantidade - ?) WHERE id_vinho = ?";
+    stmt = mysql_stmt_init(con);
+    if (mysql_stmt_prepare(stmt, query_update, strlen(query_update))) { /* ... (erro) ... */ }
+
+    memset(bind, 0, sizeof(bind));
+    bind[0].buffer_type = MYSQL_TYPE_LONG;
+    bind[0].buffer = (char *)&quantidade_venda;
+    bind[1].buffer_type = MYSQL_TYPE_LONG;
+    bind[1].buffer = (char *)&id_vinho;
+    
+    mysql_stmt_bind_param(stmt, bind);
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, "\nErro ao atualizar o estoque: %s\n", mysql_stmt_error(stmt));
+        mysql_stmt_close(stmt);
+        mysql_close(con);
+        return;
+    }
+    mysql_stmt_close(stmt); // Fecha o statement do UPDATE
+
+    // 5d. Registrar a movimentação (INSERT na tabela 'movimentacao')
+    char query_insert[] = "INSERT INTO movimentacao (tipo_movimentacao, quantidade_movimentada, fk_vinho_id_vinho, fk_usuario_id_usuario) VALUES ('SAIDA', ?, ?, ?)";
+    stmt = mysql_stmt_init(con);
+    if (mysql_stmt_prepare(stmt, query_insert, strlen(query_insert))) { /* ... (erro) ... */ }
+
+    memset(bind, 0, sizeof(bind));
+    bind[0].buffer_type = MYSQL_TYPE_LONG;
+    bind[0].buffer = (char *)&quantidade_venda;
+    bind[1].buffer_type = MYSQL_TYPE_LONG;
+    bind[1].buffer = (char *)&id_vinho;
+    bind[2].buffer_type = MYSQL_TYPE_LONG;
+    bind[2].buffer = (char *)&g_id_usuario_logado; // <-- ID do usuário logado
+
+    mysql_stmt_bind_param(stmt, bind);
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, "\nErro ao registrar a movimentacao: %s\n", mysql_stmt_error(stmt));
+        // (Nota: Em um sistema real, aqui você daria um ROLLBACK)
+    }
+    mysql_stmt_close(stmt); // Fecha o statement do INSERT
+
+    //registro de LOG
+    char log_msg[256];
+    sprintf(log_msg, "VENDA: %d un. do Vinho ID %d para %s", quantidade_venda, id_vinho, nome_cliente);
+    registrarLog(log_msg);
+
+    // --- 6. MOSTRAR RESUMO ---
+    double valor_total = preco_vinho * quantidade_venda;
+    
+    limparTela();
+    printf("\n--- VENDA CONCLUIDA COM SUCESSO ---\n");
+    printf("Cliente: \t%s\n", nome_cliente);
+    printf("Vinho: \t\t%s (ID: %d)\n", nome_vinho, id_vinho);
+    printf("Quantidade: \t%d\n", quantidade_venda);
+    printf("Preco Unit.: \tR$ %.2f\n", preco_vinho);
+    printf("----------------------------------------\n");
+    printf("VALOR TOTAL: \tR$ %.2f\n", valor_total);
+    printf("----------------------------------------\n");
+    printf("Estoque Atualizado: %d\n", (qtd_estoque - quantidade_venda));
+
+    mysql_close(con);
+}
+
+/*
+ * ==========================================================
+ * FUNÇÕES DE LOG (Completas e Corrigidas)
+ * ==========================================================
+ */
+
+/*
+ * (MOTOR DE LOG)
+ * Registra uma ação na tabela de log.
+ * Esta função abre e fecha sua própria conexão para ser rápida e independente.
+ * Ela usa "falha silenciosa" intencionalmente para não travar o programa
+ * principal se o log falhar.
+ */
+void registrarLog(const char *acao) {
+    // Se nenhum usuário estiver logado, não faz nada
+    if (g_id_usuario_logado == 0) return;
+
+    MYSQL *con_log = conectar_db();
+    MYSQL_STMT *stmt;
+    MYSQL_BIND bind[2];
+    char query[] = "INSERT INTO log (acao, fk_usuario_id_usuario) VALUES (?, ?)";
+
+    stmt = mysql_stmt_init(con_log);
+    if (!stmt) { 
+        // Falha silenciosa
+        mysql_close(con_log); 
+        return; 
+    }
+
+    if (mysql_stmt_prepare(stmt, query, strlen(query))) {
+        // Falha silenciosa
+        mysql_stmt_close(stmt);
+        mysql_close(con_log);
+        return;
+    }
+
+    memset(bind, 0, sizeof(bind));
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (char *)acao;
+    bind[0].buffer_length = strlen(acao);
+    
+    bind[1].buffer_type = MYSQL_TYPE_LONG;
+    bind[1].buffer = (char *)&g_id_usuario_logado;
+
+    // CORREÇÃO: Adiciona a limpeza em caso de falha no bind
+    if (mysql_stmt_bind_param(stmt, bind)) { 
+        // Falha silenciosa
+        mysql_stmt_close(stmt);
+        mysql_close(con_log);
+        return;
+    }
+
+    // CORREÇÃO: Adiciona a limpeza em caso de falha no execute
+    if (mysql_stmt_execute(stmt)) { 
+        // Falha silenciosa
+    }
+
+    mysql_stmt_close(stmt);
+    mysql_close(con_log);
+}
+
+/*
+ * (VISUALIZADOR DE LOG)
+ * Mostra o histórico de logs do sistema.
+ */
+void listarLogs() {
+    registrarLog("VISUALIZOU LOGS (Ultimos 50)");
+    MYSQL *con = conectar_db();
+    
+    // Query com JOIN para pegar o nome do usuário
+    char query[] = "SELECT l.id_log, l.data_hora, l.acao, u.nome_usuario "
+                   "FROM log AS l "
+                   "JOIN usuario AS u ON l.fk_usuario_id_usuario = u.id_usuario "
+                   "ORDER BY l.data_hora DESC " // Mais recentes primeiro
+                   "LIMIT 50"; // Limita aos últimos 50 logs
+
+    if (mysql_query(con, query)) {
+        fprintf(stderr, "Erro ao listar logs: %s\n", mysql_error(con));
+        mysql_close(con);
+        return;
+    }
+
+    MYSQL_RES *result = mysql_store_result(con);
+    // CORREÇÃO: Adiciona a mensagem de erro
+    if (result == NULL) { 
+        fprintf(stderr, "Erro ao obter resultados (logs): %s\n", mysql_error(con));
+        mysql_close(con); 
+        return; 
+    }
+
+    MYSQL_ROW row;
+    int num_rows = mysql_num_rows(result);
+
+    limparTela();
+    printf("\n--- HISTORICO DE LOGS (Ultimos 50) ---\n");
+    if (num_rows == 0) {
+        printf("Nenhum registro de log encontrado.\n");
+    } else {
+        printf("%-5s | %-20s | %-15s | %-50s\n", "ID", "Data/Hora", "Usuario", "Acao");
+        printf("--------------------------------------------------------------------------------------------------\n");
+        while ((row = mysql_fetch_row(result))) {
+            printf("%-5s | %-20s | %-15s | %-50s\n",
+                   row[0], row[1], row[3], row[2]); // Ordem: ID, Data, Usuario, Acao
+        }
+        printf("--------------------------------------------------------------------------------------------------\n");
+    }
+    mysql_free_result(result);
+    mysql_close(con);
+}
+
+void listarTodosLogs() {
+    registrarLog("VISUALIZOU LOGS (TODOS)");
+    MYSQL *con = conectar_db();
+    
+    // Query com JOIN (SEM LIMITE)
+    char query[] = "SELECT l.id_log, l.data_hora, l.acao, u.nome_usuario "
+                   "FROM log AS l "
+                   "JOIN usuario AS u ON l.fk_usuario_id_usuario = u.id_usuario "
+                   "ORDER BY l.data_hora DESC"; // Mais recentes primeiro
+
+    if (mysql_query(con, query)) {
+        fprintf(stderr, "Erro ao listar todos os logs: %s\n", mysql_error(con));
+        mysql_close(con);
+        return;
+    }
+
+    MYSQL_RES *result = mysql_store_result(con);
+    if (result == NULL) { 
+        fprintf(stderr, "Erro ao obter resultados (todos os logs): %s\n", mysql_error(con));
+        mysql_close(con); 
+        return; 
+    }
+
+    MYSQL_ROW row;
+    int num_rows = mysql_num_rows(result);
+
+    limparTela();
+    printf("\n--- HISTORICO DE LOGS (COMPLETO) ---\n");
+    if (num_rows == 0) {
+        printf("Nenhum registro de log encontrado.\n");
+    } else {
+        printf("%-5s | %-20s | %-15s | %-50s\n", "ID", "Data/Hora", "Usuario", "Acao");
+        printf("--------------------------------------------------------------------------------------------------\n");
+        while ((row = mysql_fetch_row(result))) {
+            printf("%-5s | %-20s | %-15s | %-50s\n",
+                   row[0], row[1], row[3], row[2]); // Ordem: ID, Data, Usuario, Acao
+        }
+        printf("--------------------------------------------------------------------------------------------------\n");
+    }
+    mysql_free_result(result);
+    mysql_close(con);
+}
+
+/*
+ * (MENU DE LOG)
+ * Menu para acessar o visualizador de logs.
+ */
+void menuLogs() {
+    int opcao;
+    do {
+        limparTela();
+        printf("\n--- LOGS ---\n");
+        printf("1. Listar Logs (Ultimos 50)\n"); // <-- Texto atualizado
+        printf("2. Listar Logs (Todos)\n");  // <-- NOVA OPÇÃO
+        printf("0. Voltar ao Menu Principal\n");
+        printf("Escolha uma opcao: ");
+        scanf("%d", &opcao);
+        while(getchar() != '\n');
+
+        switch (opcao) {
+            case 1: 
+                listarLogs(); // A função antiga que lista 50
+                pausarTela(); 
+                break;
+            case 2:
+                listarTodosLogs(); // A nova função que lista tudo
+                pausarTela();
+                break;
+            case 0: 
+                printf("Voltando...\n"); 
+                break;
+            default: 
+                printf("Opcao invalida!\n");
+                pausarTela();
+                break;
+        }
+    } while (opcao != 0);
 }
 
 //funcao para limpeza do terminal
