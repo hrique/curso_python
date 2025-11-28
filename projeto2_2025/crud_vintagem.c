@@ -740,12 +740,13 @@ void listarVinhos() {
 }
 
 void listarTodosVinhosSimples(MYSQL *con) {
+    // ALTERAÇÃO: ORDER BY v.id_vinho
     char query[] = 
         "SELECT v.id_vinho, v.nome_vinho, v.quantidade, IFNULL(t.nome_tipo, 'N/A'), "
         "CASE WHEN v.ativo = 1 THEN 'EM ESTOQUE' ELSE 'SEM ESTOQUE' END as status "
         "FROM vinho AS v "
         "LEFT JOIN tipo AS t ON v.fk_tipo_id_tipo = t.id_tipo "
-        "ORDER BY v.id_vinho"; // ALTERADO: Ordenar por ID
+        "ORDER BY v.id_vinho"; 
 
     if (mysql_query(con, query)) {
         fprintf(stderr, "Erro ao listar todos vinhos: %s\n", mysql_error(con));
@@ -911,9 +912,10 @@ void atualizarVinho() {
 
 void listarEntidadeSimples(MYSQL *con, const char* nomeEntidade, const char* nomeTabela, const char* nomeColunaId, const char* nomeColunaNome) {
     char query[512];
-    // ALTERAÇÃO: Removido WHERE ativo = ...
+    
+    // ALTERAÇÃO: ORDER BY nomeColunaId (ordem numérica) em vez de nomeColunaNome
     sprintf(query, "SELECT %s, %s FROM %s ORDER BY %s", 
-            nomeColunaId, nomeColunaNome, nomeTabela, nomeColunaNome); // Ordena por nome
+            nomeColunaId, nomeColunaNome, nomeTabela, nomeColunaId); 
 
     if (mysql_query(con, query)) {
         fprintf(stderr, "Erro ao listar %s: %s\n", nomeTabela, mysql_error(con));
@@ -929,7 +931,6 @@ void listarEntidadeSimples(MYSQL *con, const char* nomeEntidade, const char* nom
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(result);
 
-    // ALTERAÇÃO: Texto simplificado
     printf("\n--- Lista de %s ---\n", nomeEntidade);
     if (num_rows == 0) {
         printf("Nenhum %s cadastrado.\n", nomeEntidade);
@@ -1638,18 +1639,17 @@ void registrarLog(const char *acao) {
 void listarLogs() {
     registrarLog("VISUALIZOU LOGS (Ultimos 50)");
     MYSQL *con = conectar_db();
-    //verifica a conexao
     if (con == NULL) {
         fprintf(stderr, "\nErro: Nao foi possivel conectar ao banco. Tente novamente mais tarde.\n");
-        return; // Apenas volta ao menu anterior
+        return; 
     }
     
-    // Query com JOIN para pegar o nome do usuário
+    // ALTERAÇÃO: ORDER BY l.id_log DESC
     char query[] = "SELECT l.id_log, l.data_hora, l.acao, u.nome_usuario "
                    "FROM log AS l "
                    "JOIN usuario AS u ON l.fk_usuario_id_usuario = u.id_usuario "
-                   "ORDER BY l.data_hora DESC " // Mais recentes primeiro
-                   "LIMIT 50"; // Limita aos últimos 50 logs
+                   "ORDER BY l.id_log DESC " // IDs maiores (mais novos) primeiro
+                   "LIMIT 50"; 
 
     if (mysql_query(con, query)) {
         fprintf(stderr, "Erro ao listar logs: %s\n", mysql_error(con));
@@ -1658,16 +1658,13 @@ void listarLogs() {
     }
 
     MYSQL_RES *result = mysql_store_result(con);
-    // CORREÇÃO: Adiciona a mensagem de erro
     if (result == NULL) { 
         fprintf(stderr, "Erro ao obter resultados (logs): %s\n", mysql_error(con));
         mysql_close(con); 
         return; 
     }
-
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(result);
-
     limparTela();
     printf("\n--- HISTORICO DE LOGS (Ultimos 50) ---\n");
     if (num_rows == 0) {
@@ -1676,8 +1673,7 @@ void listarLogs() {
         printf("%-5s | %-20s | %-15s | %-50s\n", "ID", "Data/Hora", "Usuario", "Acao");
         printf("--------------------------------------------------------------------------------------------------\n");
         while ((row = mysql_fetch_row(result))) {
-            printf("%-5s | %-20s | %-15s | %-50s\n",
-                   row[0], row[1], row[3], row[2]); // Ordem: ID, Data, Usuario, Acao
+            printf("%-5s | %-20s | %-15s | %-50s\n", row[0], row[1], row[3], row[2]); 
         }
         printf("--------------------------------------------------------------------------------------------------\n");
     }
@@ -1688,18 +1684,16 @@ void listarLogs() {
 void listarTodosLogs() {
     registrarLog("VISUALIZOU LOGS (TODOS)");
     MYSQL *con = conectar_db();
-    
-    //verifica a conexao
     if (con == NULL) {
         fprintf(stderr, "\nErro: Nao foi possivel conectar ao banco. Tente novamente mais tarde.\n");
-        return; // Apenas volta ao menu anterior
+        return; 
     }
     
-    // Query com JOIN (SEM LIMITE)
+    // ALTERAÇÃO: ORDER BY l.id_log DESC
     char query[] = "SELECT l.id_log, l.data_hora, l.acao, u.nome_usuario "
                    "FROM log AS l "
                    "JOIN usuario AS u ON l.fk_usuario_id_usuario = u.id_usuario "
-                   "ORDER BY l.data_hora DESC"; // Mais recentes primeiro
+                   "ORDER BY l.id_log DESC"; // IDs maiores primeiro
 
     if (mysql_query(con, query)) {
         fprintf(stderr, "Erro ao listar todos os logs: %s\n", mysql_error(con));
@@ -1713,10 +1707,8 @@ void listarTodosLogs() {
         mysql_close(con); 
         return; 
     }
-
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(result);
-
     limparTela();
     printf("\n--- HISTORICO DE LOGS (COMPLETO) ---\n");
     if (num_rows == 0) {
@@ -1725,8 +1717,7 @@ void listarTodosLogs() {
         printf("%-5s | %-20s | %-15s | %-50s\n", "ID", "Data/Hora", "Usuario", "Acao");
         printf("--------------------------------------------------------------------------------------------------\n");
         while ((row = mysql_fetch_row(result))) {
-            printf("%-5s | %-20s | %-15s | %-50s\n",
-                   row[0], row[1], row[3], row[2]); // Ordem: ID, Data, Usuario, Acao
+            printf("%-5s | %-20s | %-15s | %-50s\n", row[0], row[1], row[3], row[2]); 
         }
         printf("--------------------------------------------------------------------------------------------------\n");
     }
@@ -1822,13 +1813,13 @@ void menuLogs() {
 }
 
 void listarVinhosSimples(MYSQL *con) {
-    // Query mais simples para a lista principal
+    // ALTERAÇÃO: ORDER BY v.id_vinho
     char query[] = 
         "SELECT v.id_vinho, v.nome_vinho, v.safra, v.preco, IFNULL(t.nome_tipo, 'N/A') "
         "FROM vinho AS v "
         "LEFT JOIN tipo AS t ON v.fk_tipo_id_tipo = t.id_tipo "
-        "WHERE v.ativo = 1 " 
-        "ORDER BY v.id_vinho"; // ALTERADO: Ordenar por ID
+        "WHERE v.ativo = 1 "
+        "ORDER BY v.id_vinho"; 
 
     if (mysql_query(con, query)) {
         fprintf(stderr, "Erro ao listar vinhos (simples): %s\n", mysql_error(con));
@@ -1855,11 +1846,11 @@ void listarVinhosSimples(MYSQL *con) {
 
         while ((row = mysql_fetch_row(result))) {
             printf("%-3s | %-40s | %-5s | %-10s | %-15s\n",
-                   row[0] ? row[0] : "N/A", // ID
-                   row[1] ? row[1] : "N/A", // Nome
-                   row[2] ? row[2] : "N/A", // Safra
-                   row[3] ? row[3] : "N/A", // Preco
-                   row[4] ? row[4] : "N/A"); // Tipo
+                   row[0] ? row[0] : "N/A",
+                   row[1] ? row[1] : "N/A",
+                   row[2] ? row[2] : "N/A",
+                   row[3] ? row[3] : "N/A",
+                   row[4] ? row[4] : "N/A");
         }
         printf("--------------------------------------------------------------------------\n");
     }
